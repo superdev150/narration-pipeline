@@ -1,0 +1,27 @@
+{
+    "name": "superdev150/narration-pipeline",
+    "description": "Markdown → sentence-by-sentence TTS with exact per-sentence timestamps, loudness normalisation and background-music mixing (PHP + ffmpeg).",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["tts", "text-to-speech", "audio", "ffmpeg", "loudness", "lufs", "subtitles", "narration"],
+    "require": {
+        "php": ">=8.2",
+        "guzzlehttp/guzzle": "^7.9"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^10.5 || ^11.0"
+    },
+    "autoload": {
+        "psr-4": { "Showcase\\Narration\\": "src/" }
+    },
+    "autoload-dev": {
+        "psr-4": { "Showcase\\Narration\\Tests\\": "tests/" }
+    },
+    "scripts": {
+        "test": "phpunit",
+        "demo": "php bin/demo"
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

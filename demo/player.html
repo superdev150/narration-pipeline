@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Narration player</title>
+<style>
+  :root { --bg: #f7f6f2; --fg: #1d1d1b; --muted: #8a8880; --hl: #ffe7a3; --card: #fff; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #151513; --fg: #ecebe6; --muted: #8a8880; --hl: #5c4a12; --card: #1f1f1c; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 18px/1.6 Georgia, serif; }
+  main { max-width: 640px; margin: 0 auto; padding: 24px 16px 120px; }
+  h2 { font-size: 1.4em; margin: 1.4em 0 .4em; } h3 { font-size: 1.1em; }
+  blockquote { margin: 1em 0; padding: .6em 1em; background: var(--card); border-left: 3px solid var(--muted); }
+  .s { border-radius: 4px; transition: background .2s; cursor: pointer; }
+  .s.on { background: var(--hl); }
+  .pause { color: var(--muted); font: 13px system-ui, sans-serif; margin: .4em 0; }
+  .page { border-top: 1px dashed var(--muted); margin-top: 2em; }
+  .page:first-child { border: 0; margin: 0; }
+  footer { position: fixed; inset: auto 0 0 0; background: var(--card); padding: 12px 16px; display: flex; gap: 12px;
+           align-items: center; font: 14px system-ui, sans-serif; box-shadow: 0 -1px 8px #0002; }
+  button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid var(--muted); background: transparent; color: var(--fg); }
+  #time { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+</style>
+</head>
+<body>
+<main id="text">Run <code>php bin/demo</code> first, then serve this folder: <code>php -S 127.0.0.1:8090 -t demo</code>.</main>
+<footer>
+  <button id="play">Play</button>
+  <label><input type="checkbox" id="music" checked> Music</label>
+  <span id="time">0:00</span>
+</footer>
+<audio id="audio" preload="auto"></audio>
+<script>
+// The app does the same: render the blocks, highlight the sentence whose [a, b) contains currentTime,
+// and switch between the voice-only and the mixed file at the same second (they have the same duration).
+const $ = (id) => document.getElementById(id);
+const audio = $('audio');
+let timings = [], spans = [], current = -1;
+
+const inline = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+  .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\*(.+?)\*/g, '<em>$1</em>');
+const fmt = (t) => `${Math.floor(t / 60)}:${String(Math.floor(t % 60)).padStart(2, '0')}`;
+
+fetch('out/content.json').then((r) => r.json()).then((c) => {
+  timings = c.timings;
+  const byKey = new Map(timings.map((t, i) => [`${t.p}.${t.s}`, i]));
+  const main = $('text');
+  main.innerHTML = '';
+  c.pages.forEach((page, p) => {
+    const div = document.createElement('div');
+    div.className = 'page';
+    let s = 0, list = null;
+    for (const b of page.blocks) {
+      if (b.k === 'pause') { div.insertAdjacentHTML('beforeend', `<div class="pause">· pause ${b.n}s ·</div>`); continue; }
+      const html = b.s.map((txt) => `<span class="s" data-i="${byKey.get(`${p}.${s++}`)}">${inline(txt)}</span>`).join(' ');
+      const tag = { h2: 'h2', h3: 'h3', quote: 'blockquote', li: 'li', oli: 'li' }[b.k] || 'p';
+      if (tag === 'li') {
+        if (!list) { list = document.createElement(b.k === 'oli' ? 'ol' : 'ul'); div.appendChild(list); }
+        list.insertAdjacentHTML('beforeend', `<li>${html}</li>`);
+      } else { list = null; div.insertAdjacentHTML('beforeend', `<${tag}>${html}</${tag}>`); }
+    }
+    main.appendChild(div);
+  });
+  spans = [...document.querySelectorAll('.s')].sort((a, b) => a.dataset.i - b.dataset.i);
+  spans.forEach((el) => el.onclick = () => { audio.currentTime = timings[el.dataset.i].a; audio.play(); });
+  audio.src = $('music').checked ? c.audio.mix : c.audio.voice;
+  $('music').onchange = () => {
+    const t = audio.currentTime, playing = !audio.paused;
+    audio.src = $('music').checked ? c.audio.mix : c.audio.voice;
+    audio.currentTime = t;
+    if (playing) audio.play();
+  };
+});
+
+$('play').onclick = () => audio.paused ? audio.play() : audio.pause();
+audio.onplay = () => $('play').textContent = 'Pause';
+audio.onpause = () => $('play').textContent = 'Play';
+audio.ontimeupdate = () => {
+  const t = audio.currentTime;
+  $('time').textContent = fmt(t);
+  const i = timings.findIndex((x) => t >= x.a && t < x.b);
+  if (i === current) return;
+  spans[current]?.classList.remove('on');
+  spans[i]?.classList.add('on');
+  spans[i]?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  current = i;
+};
+</script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * Render demo/script.md and open demo/player.html to see the sentence highlighting in sync with the audio.
+ *
+ *   php bin/demo                      offline tones instead of a voice (no keys, free)
+ *   php bin/demo --openai             OPENAI_API_KEY, voice "coral"
+ *   php bin/demo --google=<project>   Google Cloud TTS with `gcloud auth print-access-token`
+ *
+ * Output in demo/out/: voice.mp3, mix.mp3 (same duration), content.json (pages, blocks, timings).
+ */
+
+declare(strict_types=1);
+
+require __DIR__ . '/../vendor/autoload.php';
+
+use Showcase\Narration\Audio\Ffmpeg;
+use Showcase\Narration\Narrator;
+use Showcase\Narration\Script;
+use Showcase\Narration\Synth\CachedSynthesizer;
+use Showcase\Narration\Synth\GoogleSynthesizer;
+use Showcase\Narration\Synth\OpenAiSynthesizer;
+use Showcase\Narration\Synth\ToneSynthesizer;
+use Showcase\Narration\Synth\Voice;
+
+$opts = getopt('', ['openai', 'google:']);
+$out = __DIR__ . '/../demo/out';
+@mkdir($out, 0775, true);
+
+if (isset($opts['openai'])) {
+    $synth = new OpenAiSynthesizer((string) getenv('OPENAI_API_KEY'));
+    $voice = new Voice('openai', 'coral', 0.95, instructions: 'Calm, warm and unhurried, like a meditation teacher.');
+} elseif (isset($opts['google'])) {
+    $token = trim((string) shell_exec('gcloud auth print-access-token'));
+    $synth = new GoogleSynthesizer(fn () => $token, (string) $opts['google']);
+    $voice = new Voice('google', 'en-US-Chirp3-HD-Aoede', 0.9);
+} else {
+    $synth = new ToneSynthesizer();
+    $voice = new Voice('tone', 'demo');
+}
+$synth = new CachedSynthesizer($synth, sys_get_temp_dir() . '/narration-demo-cache');
+
+$pages = Script::pages((string) file_get_contents(__DIR__ . '/../demo/script.md'));
+foreach (Script::problems($pages) as $problem) {
+    fwrite(STDERR, "warning: {$problem}\n");
+}
+
+$started = microtime(true);
+$track = (new Narrator($synth))->render($pages, $voice, ['pauses' => Narrator::MEDITATION, 'lead' => 4.0, 'tail' => 10.0]);
+
+$ffmpeg = new Ffmpeg();
+$gain = $ffmpeg->voiceGain($track['pcm']);
+file_put_contents("{$out}/voice.mp3", $ffmpeg->voiceMp3($track['pcm'], $gain));
+
+$music = "{$out}/music.mp3";
+$ffmpeg->makeAmbient($music, 40);   // shorter than the track on purpose: watch it loop with crossfades
+file_put_contents("{$out}/mix.mp3", $ffmpeg->mix($track['pcm'], $music, $ffmpeg->duration($music), -19.0, $gain));
+
+file_put_contents("{$out}/content.json", json_encode([
+    'pages' => Script::document($pages),
+    'timings' => $track['timings'],
+    'duration' => $track['duration'],
+    'audio' => ['voice' => 'out/voice.mp3', 'mix' => 'out/mix.mp3'],
+    'hash' => Script::hash($pages),
+], JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+printf(
+    "%d sentences, %.1f s, voice gain %+.1f dB, %d chars synthesized, %.1f s to render\n" .
+    "voice %.1f s · mix %.1f s\nOpen demo/player.html (serve with: php -S 127.0.0.1:8090 -t demo)\n",
+    count($track['timings']), $track['duration'], $gain, $track['chars'], microtime(true) - $started,
+    $ffmpeg->duration("{$out}/voice.mp3"), $ffmpeg->duration("{$out}/mix.mp3"),
+);
